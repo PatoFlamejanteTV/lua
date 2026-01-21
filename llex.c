@@ -476,24 +476,29 @@ static int llex (LexState *ls, SemInfo *seminfo) {
         next(ls);
         break;
       }
-      case '-': {  /* '-' or '--' (comment) */
+      case '-': {  /* '-', '-=', or '--' (comment) */
         next(ls);
-        if (ls->current != '-') return '-';
-        /* else is a comment */
-        next(ls);
-        if (ls->current == '[') {  /* long comment? */
-          size_t sep = skip_sep(ls);
-          luaZ_resetbuffer(ls->buff);  /* 'skip_sep' may dirty the buffer */
-          if (sep >= 2) {
-            read_long_string(ls, NULL, sep);  /* skip long comment */
-            luaZ_resetbuffer(ls->buff);  /* previous call may dirty the buff. */
-            break;
+        if (ls->current == '-') {  /* comment */
+          next(ls);
+          if (ls->current == '[') {  /* long comment? */
+            size_t sep = skip_sep(ls);
+            luaZ_resetbuffer(ls->buff);  /* 'skip_sep' may dirty the buffer */
+            if (sep >= 2) {
+              read_long_string(ls, NULL, sep);  /* skip long comment */
+              luaZ_resetbuffer(ls->buff);  /* previous call may dirty the buff. */
+              break;
+            }
           }
+          /* else short comment */
+          while (!currIsNewline(ls) && ls->current != EOZ)
+            next(ls);  /* skip until end of line (or end of file) */
+          break;
         }
-        /* else short comment */
-        while (!currIsNewline(ls) && ls->current != EOZ)
-          next(ls);  /* skip until end of line (or end of file) */
-        break;
+        else if (ls->current == '=') {  /* -= */
+          next(ls);
+          return TK_SUBASSIGN;
+        }
+        else return '-';
       }
       case '[': {  /* long string or simply '[' */
         size_t sep = skip_sep(ls);
@@ -510,27 +515,98 @@ static int llex (LexState *ls, SemInfo *seminfo) {
         if (check_next1(ls, '=')) return TK_EQ;  /* '==' */
         else return '=';
       }
-      case '<': {
+      case '+': {  /* '+' or '+=' */
+        next(ls);
+        if (ls->current == '=') {
+          next(ls);
+          return TK_ADDASSIGN;
+        }
+        else return '+';
+      }
+      case '*': {  /* '*' or '*=' */
+        next(ls);
+        if (ls->current == '=') {
+          next(ls);
+          return TK_MULASSIGN;
+        }
+        else return '*';
+      }
+      case '<': {  /* '<', '<<', '<=', or '<<=' */
         next(ls);
         if (check_next1(ls, '=')) return TK_LE;  /* '<=' */
-        else if (check_next1(ls, '<')) return TK_SHL;  /* '<<' */
+        else if (check_next1(ls, '<')) {
+          if (ls->current == '=') {
+            next(ls);
+            return TK_SHLASSIGN;  /* '<<=' */
+          }
+          else return TK_SHL;  /* '<<' */
+        }
         else return '<';
       }
-      case '>': {
+      case '>': {  /* '>', '>>', '>=', or '>>=' */
         next(ls);
         if (check_next1(ls, '=')) return TK_GE;  /* '>=' */
-        else if (check_next1(ls, '>')) return TK_SHR;  /* '>>' */
+        else if (check_next1(ls, '>')) {
+          if (ls->current == '=') {
+            next(ls);
+            return TK_SHRASSIGN;  /* '>>=' */
+          }
+          else return TK_SHR;  /* '>>' */
+        }
         else return '>';
       }
-      case '/': {
+      case '/': {  /* '/', '//', '/=', or '//=' */
         next(ls);
-        if (check_next1(ls, '/')) return TK_IDIV;  /* '//' */
+        if (ls->current == '/') {
+          next(ls);
+          if (ls->current == '=') {
+            next(ls);
+            return TK_IDIVASSIGN;  /* '//=' */
+          }
+          else return TK_IDIV;  /* '//' */
+        }
+        else if (ls->current == '=') {
+          next(ls);
+          return TK_DIVASSIGN;  /* '/=' */
+        }
         else return '/';
       }
-      case '~': {
+      case '~': {  /* '~' or '~=' */
         next(ls);
         if (check_next1(ls, '=')) return TK_NE;  /* '~=' */
         else return '~';
+      }
+      case '%': {  /* '%' or '%=' */
+        next(ls);
+        if (ls->current == '=') {
+          next(ls);
+          return TK_MODASSIGN;  /* '%=' */
+        }
+        else return '%';
+      }
+      case '^': {  /* '^' or '^=' */
+        next(ls);
+        if (ls->current == '=') {
+          next(ls);
+          return TK_POWASSIGN;  /* '^=' */
+        }
+        else return '^';
+      }
+      case '&': {  /* '&' or '&=' */
+        next(ls);
+        if (ls->current == '=') {
+          next(ls);
+          return TK_ANDASSIGN;  /* '&=' */
+        }
+        else return '&';
+      }
+      case '|': {  /* '|' or '|=' */
+        next(ls);
+        if (ls->current == '=') {
+          next(ls);
+          return TK_ORASSIGN;  /* '|=' */
+        }
+        else return '|';
       }
       case ':': {
         next(ls);
