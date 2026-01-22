@@ -1488,12 +1488,42 @@ static void storevartop (FuncState *fs, expdesc *var) {
 }
 
 
+/* Check if a token is a compound assignment operator */
+static int iscompoundassign (int tok) {
+  return tok == TK_ADDASSIGN || tok == TK_SUBASSIGN || 
+         tok == TK_MULASSIGN || tok == TK_DIVASSIGN ||
+         tok == TK_IDIVASSIGN || tok == TK_MODASSIGN ||
+         tok == TK_POWASSIGN || tok == TK_ANDASSIGN ||
+         tok == TK_ORASSIGN || tok == TK_XORASSIGN ||
+         tok == TK_SHLASSIGN || tok == TK_SHRASSIGN;
+}
+
+/* Get the binary operator from a compound assignment token */
+static int binoprfromassign (int tok) {
+  switch (tok) {
+    case TK_ADDASSIGN: return OPR_ADD;
+    case TK_SUBASSIGN: return OPR_SUB;
+    case TK_MULASSIGN: return OPR_MUL;
+    case TK_DIVASSIGN: return OPR_DIV;
+    case TK_IDIVASSIGN: return OPR_IDIV;
+    case TK_MODASSIGN: return OPR_MOD;
+    case TK_POWASSIGN: return OPR_POW;
+    case TK_ANDASSIGN: return OPR_BAND;
+    case TK_ORASSIGN: return OPR_BOR;
+    case TK_XORASSIGN: return OPR_BXOR;
+    case TK_SHLASSIGN: return OPR_SHL;
+    case TK_SHRASSIGN: return OPR_SHR;
+    default: return -1;
+  }
+}
+
+
 /*
 ** Parse and compile a multiple assignment. The first "variable"
 ** (a 'suffixedexp') was already read by the caller.
 **
 ** assignment -> suffixedexp restassign
-** restassign -> ',' suffixedexp restassign | '=' explist
+** restassign -> ',' suffixedexp restassign | '=' explist | op= explist
 */
 static void restassign (LexState *ls, struct LHS_assign *lh, int nvars) {
   expdesc e;
@@ -1508,6 +1538,26 @@ static void restassign (LexState *ls, struct LHS_assign *lh, int nvars) {
     enterlevel(ls);  /* control recursion depth */
     restassign(ls, &nv, nvars+1);
     leavelevel(ls);
+  }
+  else if (iscompoundassign(ls->t.token)) {  /* compound assignment */
+    /* var op= exp  =>  var = var op exp */
+    int op = binoprfromassign(ls->t.token);
+    expdesc e1, e2;
+    int line = ls->linenumber;
+    
+    /* Copy the lvalue for the binary operation */
+    e1 = lh->v;
+    
+    luaX_next(ls);  /* skip compound assignment operator */
+    expr(ls, &e2);
+    
+    /* Perform the binary operation: e1 = e1 op e2 */
+    luaK_infix(ls->fs, op, &e1);
+    luaK_posfix(ls->fs, op, &e1, &e2, line);
+    
+    /* Store the result back to the variable */
+    luaK_storevar(ls->fs, &lh->v, &e1);
+    return;
   }
   else {  /* restassign -> '=' explist */
     int nexps;
@@ -2001,7 +2051,7 @@ static void exprstat (LexState *ls) {
   FuncState *fs = ls->fs;
   struct LHS_assign v;
   suffixedexp(ls, &v.v);
-  if (ls->t.token == '=' || ls->t.token == ',') { /* stat -> assignment ? */
+  if (ls->t.token == '=' || ls->t.token == ',' || iscompoundassign(ls->t.token)) { /* stat -> assignment ? */
     v.prev = NULL;
     restassign(ls, &v, 1);
   }
