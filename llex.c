@@ -613,6 +613,18 @@ static int llex (LexState *ls, SemInfo *seminfo) {
         if (check_next1(ls, ':')) return TK_DBCOLON;  /* '::' */
         else return ':';
       }
+      case '?': {  /* '?' or '?:' (Elvis operator) */
+        next(ls);
+        if (ls->current == ':') {
+          next(ls);
+          return TK_ELVIS;  /* '?:' */
+        }
+        else {
+          /* '?' by itself - currently not used in Lua */
+          luaX_syntaxerror(ls, "unexpected character '?'");
+          return TK_EOS;  /* unreachable */
+        }
+      }
       case '"': case '\'': {  /* short literal strings */
         read_string(ls, ls->current, seminfo);
         return TK_STRING;

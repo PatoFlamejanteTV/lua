@@ -1726,6 +1726,14 @@ void luaK_infix (FuncState *fs, BinOpr op, expdesc *v) {
       luaK_goiffalse(fs, v);  /* go ahead only if 'v' is false */
       break;
     }
+    case OPR_ELVIS: {
+      /* Elvis operator: a ?: b
+         For Elvis, we don't need jump infrastructure.
+         Just put 'a' in a register.
+      */
+      luaK_exp2anyreg(fs, v);
+      break;
+    }
     case OPR_CONCAT: {
       luaK_exp2nextreg(fs, v);  /* operand must be on the stack */
       break;

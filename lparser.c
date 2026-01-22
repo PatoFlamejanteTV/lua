@@ -1340,6 +1340,7 @@ static BinOpr getbinopr (int op) {
     case TK_GE: return OPR_GE;
     case TK_AND: return OPR_AND;
     case TK_OR: return OPR_OR;
+    case TK_ELVIS: return OPR_ELVIS;
     default: return OPR_NOBINOPR;
   }
 }
@@ -1361,7 +1362,8 @@ static const struct {
    {9, 8},                   /* '..' (right associative) */
    {3, 3}, {3, 3}, {3, 3},   /* ==, <, <= */
    {3, 3}, {3, 3}, {3, 3},   /* ~=, >, >= */
-   {2, 2}, {1, 1}            /* and, or */
+   {2, 2}, {1, 1},           /* and, or */
+   {1, 2}                    /* ?: (Elvis, left-associative) */
 };
 
 #define UNARY_PRIORITY	12  /* priority for unary operators */
@@ -1370,6 +1372,10 @@ static const struct {
 /*
 ** subexpr -> (simpleexp | unop subexpr) { binop subexpr }
 ** where 'binop' is any binary operator with a priority higher than 'limit'
+**
+** Special handling for Elvis operator (?:):
+**   Elvis is desugared to: (a == nil) and b or a
+**   This preserves nil-checking semantics while using existing operators.
 */
 static BinOpr subexpr (LexState *ls, expdesc *v, int limit) {
   BinOpr op;
@@ -1386,10 +1392,61 @@ static BinOpr subexpr (LexState *ls, expdesc *v, int limit) {
   /* expand while operators have priorities higher than 'limit' */
   op = getbinopr(ls->t.token);
   while (op != OPR_NOBINOPR && priority[op].left > limit) {
-    expdesc v2;
     BinOpr nextop;
     int line = ls->linenumber;
     luaX_next(ls);  /* skip operator */
+    
+    if (op == OPR_ELVIS) {
+      /* Elvis operator: a ?: b
+         Implements: if (a ~= nil) then a else b
+         Uses AND/OR infrastructure to preserve semantics with short-circuit evaluation.
+         
+         Bytecode: ((a == nil) and b) or a
+         But to preserve short-circuiting, we parse b AFTER checking (a == nil).
+      */
+      expdesc v2, nil_val, eq_result;
+      int line_op = line;
+      
+      /* v contains 'a'. Put it in a register with goiftrue/goiffalse logic */
+      luaK_infix(ls->fs, op, v);
+      
+      /* Now parse 'b' with short-circuit awareness */
+      nextop = subexpr(ls, &v2, priority[op].right);
+      
+      /* Create nil constant */
+      nil_val.k = VNIL;
+      nil_val.t = NO_JUMP;
+      nil_val.f = NO_JUMP;
+      
+      /* Build the desugared expression: ((a == nil) and b) or a
+         Since we already have 'a' in v and 'b' in v2, we need to:
+         1. Create a comparison (a == nil)
+         2. Combine with AND to get (comparison and b)
+         3. Combine with OR to get (... or a)
+      */
+      
+      /* Make a copy of 'a' for the final OR comparison */
+      expdesc v_copy = *v;
+      
+      /* Emit comparison (a == nil) into eq_result */
+      eq_result = *v;
+      luaK_infix(ls->fs, OPR_EQ, &eq_result);
+      luaK_posfix(ls->fs, OPR_EQ, &eq_result, &nil_val, line_op);
+      
+      /* Emit AND: eq_result and v2 */
+      luaK_infix(ls->fs, OPR_AND, &eq_result);
+      luaK_posfix(ls->fs, OPR_AND, &eq_result, &v2, line_op);
+      
+      /* Emit OR: eq_result or v_copy */
+      luaK_infix(ls->fs, OPR_OR, &eq_result);
+      luaK_posfix(ls->fs, OPR_OR, &eq_result, &v_copy, line_op);
+      
+      *v = eq_result;
+      op = nextop;
+      continue;
+    }
+    
+    expdesc v2;
     luaK_infix(ls->fs, op, v);
     /* read sub-expression with higher priority */
     nextop = subexpr(ls, &v2, priority[op].right);
